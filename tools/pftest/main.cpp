@@ -1933,44 +1933,64 @@ int runSlit()
 	//   Measured as a COVERAGE-WEIGHTED centroid of the lit rows, never as a
 	//   thresholded one: a threshold quantises to whole rows and would move by
 	//   half a cell between rasters for no reason but where it fell.
+	//   Two rasters on purpose: the predicted row scales with the picture's
+	//   height, so a formula that was quietly fitted to 180 rows would show up
+	//   at 720.
 	{
-		const float angleParam = 0.8f;//slope +0.6
-		const double slope     = controls::SlitLean( angleParam );
-		const double position  = 0.5;
-		const double wantV     = 0.5 + ( bandCentre / kW - position ) / slope;
-		const double wantRow   = wantV * kH - 0.5;
-
-		Rig rig;
-		if( !rig.begin( kW, kH ) )
-			return 1;
-		slitRig( rig );
-		rig.set( "Slit Angle", angleParam );
-		rig.set( "Slit Position", static_cast< float >( position ) );
-
-		const Frame source = bandFrame( kW, kH, kBandFirst, kBandSpan, true );
-		for( int k = 0; k < 24; ++k )
-			if( !rig.frame( k, source ) )
-				return 1;
-
-		const Frame out = rig.read();
-
-		std::vector< double > weight( kH ), row( kH );
-		for( int y = 0; y < kH; ++y )
+		struct Lean
 		{
-			weight[ y ] = static_cast< double >( rig.at( out, 0, y )[ 1 ] ) / 255.0;
-			row[ y ]    = static_cast< double >( y );
-		}
-		const Moments m = momentsOf( weight, row );
+			int width, height;
+			const char* label;
+		};
+		const Lean rasters[] = { { 320, 180, "320x180 " }, { 1280, 720, "1280x720" } };
 
-		//ONE ROW, from the lattice: the strip cannot say where along the slit
-		//something is to better than the sample it is made of.
-		const double error = std::fabs( m.mean - wantRow );
-		leanError          = error;
-		std::printf( "   leaned slope %+.2f: lit rows centred on %.3f, geometry says %.3f,"
-		             " out by %.3f row\n",
-		             slope, m.mean, wantRow, error );
-		check( m.mass > 0.5, "the leaned slit found the band at all" );
-		check( error <= 1.0, "the leaned slit crosses the band where the geometry says" );
+		for( const Lean& r : rasters )
+		{
+			const float angleParam = 0.8f;//slope +0.6
+			const double slope     = controls::SlitLean( angleParam );
+			const double position  = 0.5;
+			//The band is placed at the same FRACTION of the width at both
+			//rasters, so the crossing row is the same fraction of the height
+			//and the two runs are comparing the same geometry.
+			const int first        = r.width * kBandFirst / kW;
+			const int span         = std::max( 1, r.width * kBandSpan / kW );
+			const double centre    = first + span * 0.5;
+			const double wantV     = 0.5 + ( centre / r.width - position ) / slope;
+			const double wantRow   = wantV * r.height - 0.5;
+
+			Rig rig;
+			if( !rig.begin( r.width, r.height ) )
+				return 1;
+			slitRig( rig );
+			rig.set( "Slit Angle", angleParam );
+			rig.set( "Slit Position", static_cast< float >( position ) );
+
+			const Frame source = bandFrame( r.width, r.height, first, span, true );
+			for( int k = 0; k < 24; ++k )
+				if( !rig.frame( k, source ) )
+					return 1;
+
+			const Frame out = rig.read();
+
+			std::vector< double > weight( r.height ), row( r.height );
+			for( int y = 0; y < r.height; ++y )
+			{
+				weight[ y ] = static_cast< double >( rig.at( out, 0, y )[ 1 ] ) / 255.0;
+				row[ y ]    = static_cast< double >( y );
+			}
+			const Moments m = momentsOf( weight, row );
+
+			//ONE ROW, from the lattice: the strip cannot say where along the
+			//slit something is to better than the sample it is made of.
+			const double error = std::fabs( m.mean - wantRow );
+			leanError          = std::max( leanError, error );
+			std::printf( "   %s leaned slope %+.2f: lit rows centred on %8.3f,"
+			             " geometry says %8.3f, out by %.3f row\n",
+			             r.label, slope, m.mean, wantRow, error );
+			check( m.mass > 0.5, std::string( r.label ) + " the leaned slit found the band" );
+			check( error <= 1.0,
+			       std::string( r.label ) + " the leaned slit crosses where the geometry says" );
+		}
 	}
 
 	//4. Slit Width averages across the slit, which is the whole claim that it

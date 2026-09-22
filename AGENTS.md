@@ -322,8 +322,9 @@ build, which found two of its own checks wrong this same pass:
   but where the threshold fell. Every centroid here is coverage-weighted.
 
 And the positive discipline: prefer a tolerance derived from a lattice — one
-column, one source frame, one 8-bit code — over one fitted to the number this
-Mac printed first, and show that the analytic bound sits comfortably inside it.
+column, one row, one source frame, one 8-bit code — over one fitted to the
+number this Mac printed first, and show that the analytic bound sits
+comfortably inside it.
 
 | Check | Assertion | Tolerance, and where it comes from | Rasteriser-independent? | Raster-independent? |
 |---|---|---|---|---|
@@ -336,7 +337,7 @@ Mac printed first, and show that the analytic bound sits comfortably inside it.
 | `--matched` | rendered width `== b`, in absolute pixels | **One column**, as above; analytic bound **0.220** at the fastest rate | Yes | **Run at 320×180 and 1280×720 with the SAME absolute pixel sizes** — a 64-pixel object must come out 64 pixels wide at both |
 | `--reverse` | skewness of the strip `== ∓` skewness of the object | **0.03**, stated. The *derived* part — the worst that sampling the object's profile on the strip's own column lattice can move its skewness, maximised over 64 phases — is computed each run and asserted to be inside it; it comes out **0.0001** | Yes. Skewness is dimensionless and invariant under the stretch, translation and scaling the strip applies, so the expected number is a property of the object alone. The expected value is obtained by integrating *the same function the card is drawn from*, never a constant typed in | Run at 320×180 and 1280×720 |
 | `--sync` | one whole sweep per bar, and per beat | **Exact**: full one frame after a bar, not full one frame before | Yes | **Run at two ring lengths** (320 and 1024), so the derived column period is a different number each time |
-| `--slit` | the slit reads the column it says it does: on the band 255, one band-width off 0, **bitwise**, on both axes; a leaned slit crosses the band at the row the geometry names; `N` taps over a one-pixel line give exactly `1/N` of full scale | **Zero** on position (a band is 255 and everything else is 0, so there is no tolerance to have); **one row** on the lean, from the lattice — the strip cannot locate something along the slit to better than the sample it is made of; **one 8-bit code value** on the width | Yes. The position readings are exact fetches; the lean is a **coverage-weighted** centroid, never a thresholded one | Run at 320×180 on both axes. The lean is checked against a formula in normalised coordinates, so the raster enters only through the lattice the tolerance is already derived from |
+| `--slit` | the slit reads the column it says it does: on the band 255, one band-width off 0, **bitwise**, on both axes; a leaned slit crosses the band at the row the geometry names; `N` taps over a one-pixel line give exactly `1/N` of full scale | **Zero** on position (a band is 255 and everything else is 0, so there is no tolerance to have); **one row** on the lean, from the lattice — the strip cannot locate something along the slit to better than the sample it is made of; **one 8-bit code value** on the width | Yes. The position readings are exact fetches; the lean is a **coverage-weighted** centroid, never a thresholded one | The position and width readings run at 320×180 on both axes; **the lean runs at 320×180 and 1280×720**, because the predicted row scales with the picture's height and a formula quietly fitted to 180 rows would show up at 720. It does not: 0.031 and 0.000 of a row |
 | `--resize` | no column is darkened when the composition changes resolution mid-take | **Exact**: white in, white out, so any value below 255 is the defect | Yes | The check IS a raster change — 320×180 in, 400×200 in, with the output left at 320×180 |
 | `--negative` | nine perturbations, asserted to FAIL | n/a | Yes | Run at 320×180 |
 | `--bench` | — | **Not pass/fail.** There is no threshold worth asserting on somebody else's GPU | — | — |
@@ -435,7 +436,7 @@ has gone soft and the number it prints means nothing.
 **Verified, by measurement, on this machine (Apple Silicon, macOS 26.4,
 `4.1 Metal - 90.5`):**
 
-- **93 assertions**, all passing, across twelve check suites. The headline numbers
+- **95 assertions**, all passing, across twelve check suites. The headline numbers
   are in the table above and `tools/verify.sh` prints them on every run.
 - **A still picture renders as bitwise-constant streaks** — 0 code values of
   difference over 2.3 million samples, at three rasters, at 1:1 and magnified,
@@ -453,7 +454,8 @@ has gone soft and the number it prints means nothing.
   499,217,238 ms is bit-identical, including at the fastest column rate.
 - **The slit is where it says it is** — bitwise on the band and bitwise black
   one band-width off, on both axes; a leaned slit crosses the band 0.031 of a
-  row from where the geometry puts it; and `N` taps over a one-pixel line come
+  row from where the geometry puts it at 320×180 and 0.000 at 1280×720; and
+  `N` taps over a one-pixel line come
   back at exactly `1/N` of full scale for N = 1, 3, 8, 18 and 64.
 - **No dead controls.** All **13** measurably change the picture
   (`tools/sweep.py`), with no CONTEXT table at all — which is itself a claim:
