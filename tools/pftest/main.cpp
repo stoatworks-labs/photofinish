@@ -193,6 +193,25 @@ int stampOf( const unsigned char* pixel )
 	return static_cast< int >( pixel[ 0 ] ) + 256 * static_cast< int >( pixel[ 1 ] );
 }
 
+/// A white band of `spanPixels` columns starting at pixel `first`, on black.
+/// Vertical when `acrossX`, horizontal otherwise.
+Frame bandFrame( int width, int height, int first, int spanPixels, bool acrossX )
+{
+	Frame f = blackFrame( width, height );
+	for( int y = 0; y < height; ++y )
+	{
+		for( int x = 0; x < width; ++x )
+		{
+			const int here = acrossX ? x : y;
+			if( here < first || here >= first + spanPixels )
+				continue;
+			const size_t i = ( static_cast< size_t >( y ) * width + x ) * 4;
+			f[ i + 0 ] = f[ i + 1 ] = f[ i + 2 ] = 255;
+		}
+	}
+	return f;
+}
+
 //---------------------------------------------------------------------------
 // The moving bar, and its profile.
 //
@@ -1816,6 +1835,188 @@ int runReverse()
 }
 
 //---------------------------------------------------------------------------
+// --slit. The slit is where it says it is.
+//
+// The gap the audit found in the rest of the suite: every other check places
+// the slit at a texel centre and then measures TIME. A slit reading the wrong
+// column of the source would pass all of them, because the width of a bar's
+// crossing does not depend on where the slit is.
+//
+// So this one measures SPACE, and it is the only check here that does. A band
+// of known pixels on black: the slit either reads it or it does not, bitwise,
+// and where a leaned slit crosses it is a closed form.
+//---------------------------------------------------------------------------
+
+/// Set up a rig that writes a still strip at one column per frame, nothing
+/// interpolated, nothing magnified.
+void slitRig( Rig& rig )
+{
+	rig.set( "Sweep Length", 1.0f );
+	rig.set( "Slit Width", 0.0f );
+	rig.set( "Slit Angle", 0.5f );
+	rig.set( "Fill", static_cast< float >( kFillBuild ) );
+	rig.set( "Interpolate", static_cast< float >( kInterpolateNearest ) );
+	rig.set( "Background", static_cast< float >( kBackgroundBlack ) );
+	rig.set( "Mix", 1.0f );
+	rig.plugin.SetColumnPeriodForTest( 1.0 / rig.fps );
+}
+
+int runSlit()
+{
+	std::printf( "== slit: the slit reads the column it says it does\n" );
+
+	constexpr int kW = 320, kH = 180;
+	constexpr int kBandFirst = 96;//pixels
+	constexpr int kBandSpan  = 4;
+	const double bandCentre  = kBandFirst + kBandSpan * 0.5;//pixels, continuous
+	double leanError         = 0.0;
+
+	//1 and 2. On the band and one band-width off it, on both axes. Bitwise:
+	//    the band is 255 and everything else is 0, so there is no tolerance to
+	//    have.
+	struct Case
+	{
+		bool vertical;
+		double positionPixels;
+		int expect;
+		const char* label;
+	};
+	const Case cases[] = {
+		{ false, bandCentre, 255, "horizontal, on the band " },
+		{ false, bandCentre - kBandSpan - 1.0, 0, "horizontal, one off     " },
+		{ false, bandCentre + kBandSpan + 1.0, 0, "horizontal, one off the other way" },
+		{ true, bandCentre, 255, "vertical,   on the band " },
+		{ true, bandCentre - kBandSpan - 1.0, 0, "vertical,   one off     " },
+	};
+
+	for( const Case& c : cases )
+	{
+		Rig rig;
+		if( !rig.begin( kW, kH ) )
+			return 1;
+		slitRig( rig );
+		rig.set( "Axis", c.vertical ? 1.0f : 0.0f );
+
+		//The slit's position is in units of the axis it cuts ACROSS: the
+		//picture's width for a horizontal sweep, its height for a vertical
+		//one.
+		const double across = c.vertical ? kH : kW;
+		rig.set( "Slit Position", static_cast< float >( c.positionPixels / across ) );
+
+		//The band runs across the slit, so it is a band of columns for a
+		//horizontal sweep and a band of rows for a vertical one.
+		const Frame source = bandFrame( kW, kH, kBandFirst, kBandSpan, !c.vertical );
+		for( int k = 0; k < 24; ++k )
+			if( !rig.frame( k, source ) )
+				return 1;
+
+		const Frame out    = rig.read();
+		const int filled   = rig.plugin.FilledForTest();
+		int worst          = 0;
+		for( int i = 0; i < filled; ++i )
+		{
+			//Along the slit, the band fills every sample, so any position does.
+			const unsigned char* px = c.vertical ? rig.at( out, kW / 2, kH - 1 - i )
+			                                     : rig.at( out, i, kH / 2 );
+			worst = std::max( worst, std::abs( static_cast< int >( px[ 1 ] ) - c.expect ) );
+		}
+
+		std::printf( "   %-33s %d columns, worst %d code value(s) from %d\n", c.label, filled,
+		             worst, c.expect );
+		check( worst == 0, std::string( c.label ) + " reads exactly what is there" );
+	}
+
+	//3. A leaned slit crosses the band at a row the geometry names.
+	//
+	//   pos + slope * ( v - 0.5 ) = bandCentre / W  =>  v = 0.5 + ( centre - pos ) / slope
+	//
+	//   Measured as a COVERAGE-WEIGHTED centroid of the lit rows, never as a
+	//   thresholded one: a threshold quantises to whole rows and would move by
+	//   half a cell between rasters for no reason but where it fell.
+	{
+		const float angleParam = 0.8f;//slope +0.6
+		const double slope     = controls::SlitLean( angleParam );
+		const double position  = 0.5;
+		const double wantV     = 0.5 + ( bandCentre / kW - position ) / slope;
+		const double wantRow   = wantV * kH - 0.5;
+
+		Rig rig;
+		if( !rig.begin( kW, kH ) )
+			return 1;
+		slitRig( rig );
+		rig.set( "Slit Angle", angleParam );
+		rig.set( "Slit Position", static_cast< float >( position ) );
+
+		const Frame source = bandFrame( kW, kH, kBandFirst, kBandSpan, true );
+		for( int k = 0; k < 24; ++k )
+			if( !rig.frame( k, source ) )
+				return 1;
+
+		const Frame out = rig.read();
+
+		std::vector< double > weight( kH ), row( kH );
+		for( int y = 0; y < kH; ++y )
+		{
+			weight[ y ] = static_cast< double >( rig.at( out, 0, y )[ 1 ] ) / 255.0;
+			row[ y ]    = static_cast< double >( y );
+		}
+		const Moments m = momentsOf( weight, row );
+
+		//ONE ROW, from the lattice: the strip cannot say where along the slit
+		//something is to better than the sample it is made of.
+		const double error = std::fabs( m.mean - wantRow );
+		leanError          = error;
+		std::printf( "   leaned slope %+.2f: lit rows centred on %.3f, geometry says %.3f,"
+		             " out by %.3f row\n",
+		             slope, m.mean, wantRow, error );
+		check( m.mass > 0.5, "the leaned slit found the band at all" );
+		check( error <= 1.0, "the leaned slit crosses the band where the geometry says" );
+	}
+
+	//4. Slit Width averages across the slit, which is the whole claim that it
+	//   is an exposure time rather than a blur: N taps over a band ONE pixel
+	//   wide come back at exactly 1/N of full scale.
+	{
+		const float widths[] = { 0.0f, 0.3f, 0.5f, 0.7f, 1.0f };
+		int worst            = 0;
+
+		for( float widthParam : widths )
+		{
+			const int taps = controls::SlitWidthPixels( widthParam );
+
+			Rig rig;
+			if( !rig.begin( kW, kH ) )
+				return 1;
+			slitRig( rig );
+			rig.set( "Slit Width", widthParam );
+			//A one-pixel band, at a texel centre, with the slit centred on it.
+			rig.set( "Slit Position", ( static_cast< float >( kBandFirst ) + 0.5f ) / kW );
+
+			const Frame source = bandFrame( kW, kH, kBandFirst, 1, true );
+			for( int k = 0; k < 8; ++k )
+				if( !rig.frame( k, source ) )
+					return 1;
+
+			const int got  = rig.read()[ ( static_cast< size_t >( kH / 2 ) * kW + 0 ) * 4 + 1 ];
+			const int want = static_cast< int >( std::lround( 255.0 / taps ) );
+			worst          = std::max( worst, std::abs( got - want ) );
+
+			std::printf( "   %2d tap(s) over a 1px line: %3d of 255, want %3d\n", taps, got, want );
+		}
+
+		//ONE CODE VALUE, from the 8-bit ring: the average of N taps is an exact
+		//fraction and the only question is which way the write rounded.
+		check( worst <= kCodeTolerance,
+		       "Slit Width averages across the slit: N taps give 1/N of full scale" );
+		headline( "slit", "position / lean / width",
+		          "0 code values, " + figure( "%.3f", leanError ) + " row (tolerance 1), "
+		              + std::to_string( worst ) + " code values (tolerance 1)" );
+	}
+
+	return 0;
+}
+
+//---------------------------------------------------------------------------
 // --resize. A composition that changes resolution mid-take.
 //
 // The narrowest check here and the one with the least obvious failure. When
@@ -2187,8 +2388,40 @@ int runNegative()
 		       "the resize check rejects a frame copy that had been cleared" );
 	}
 
+	//8. A slit ONE PIXEL off the band, judged as being on it. The tightest
+	//   spatial discrimination there is here: a band four pixels wide, and the
+	//   first texel centre outside it reads 0 where the last one inside reads
+	//   255.
+	{
+		constexpr int kW = 320, kH = 180, kBandFirst = 96, kBandSpan = 4;
+
+		int reading[ 2 ] = { -1, -1 };
+		for( int i = 0; i < 2; ++i )
+		{
+			Rig rig;
+			if( !rig.begin( kW, kH ) )
+				return 1;
+			slitRig( rig );
+			//99.5 px is the last texel centre inside the band; 100.5 is the
+			//first outside it. One pixel apart.
+			rig.set( "Slit Position", ( i == 0 ? 99.5f : 100.5f ) / kW );
+
+			const Frame source = bandFrame( kW, kH, kBandFirst, kBandSpan, true );
+			for( int k = 0; k < 8; ++k )
+				if( !rig.frame( k, source ) )
+					return 1;
+
+			reading[ i ] = rig.read()[ ( static_cast< size_t >( kH / 2 ) * kW + 0 ) * 4 + 1 ];
+		}
+
+		std::printf( "   the slit one pixel apart: %d inside the band, %d outside\n",
+		             reading[ 0 ], reading[ 1 ] );
+		check( reading[ 0 ] == 255 && reading[ 1 ] == 0,
+		       "the slit check rejects a slit one pixel out of position" );
+	}
+
 	headline( "negative", "perturbations correctly rejected",
-	          std::to_string( 8 - ( g_failures - failuresBefore ) ) + " of 8" );
+	          std::to_string( 9 - ( g_failures - failuresBefore ) ) + " of 9" );
 	return 0;
 }
 
@@ -2331,6 +2564,7 @@ int main( int argc, char** argv )
 	bool wantReverse  = false;
 	bool wantSync     = false;
 	bool wantResize   = false;
+	bool wantSlit     = false;
 	bool wantNegative = false;
 	bool wantBench    = false;
 
@@ -2390,6 +2624,8 @@ int main( int argc, char** argv )
 			wantSync = true;
 		else if( argument == "--resize" )
 			wantResize = true;
+		else if( argument == "--slit" )
+			wantSlit = true;
 		else if( argument == "--negative" )
 			wantNegative = true;
 		else if( argument == "--bench" )
@@ -2411,8 +2647,8 @@ int main( int argc, char** argv )
 	//No GL needed, so it is answered before a context is made -- which means
 	//it still works on a machine where creating one fails, and in CI.
 	if( wantSchedule && !wantStatic && !wantRing && !wantClock && !wantInterp && !wantWidth
-	    && !wantMatched && !wantReverse && !wantSync && !wantResize && !wantNegative
-	    && !wantBench )
+	    && !wantMatched && !wantReverse && !wantSync && !wantResize && !wantSlit
+	    && !wantNegative && !wantBench )
 	{
 		runSchedule();
 		printSummary();
@@ -2447,7 +2683,7 @@ int main( int argc, char** argv )
 
 	const bool anyCheck = wantSchedule || wantStatic || wantRing || wantClock || wantInterp
 	                      || wantWidth || wantMatched || wantReverse || wantSync || wantResize
-	                      || wantNegative;
+	                      || wantSlit || wantNegative;
 
 	if( anyCheck )
 	{
@@ -2469,6 +2705,8 @@ int main( int argc, char** argv )
 			runReverse();
 		if( wantSync )
 			runSync();
+		if( wantSlit )
+			runSlit();
 		if( wantResize )
 			runResize();
 		if( wantNegative )

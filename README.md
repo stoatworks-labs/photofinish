@@ -8,8 +8,9 @@
 > rasters (`--matched`); a still picture renders as **bitwise** constant streaks over 2.2
 > million samples (`--static`); the ring holds the right frames in the right order,
 > bitwise, at three rasters (`--ring`); the same take rendered from t=0 and from
-> 499,217,238 ms is **bit-identical** (`--clock`); and eight deliberate perturbations of
-> the model are asserted to make those checks *fail* (`--negative`). All thirteen controls
+> 499,217,238 ms is **bit-identical** (`--clock`); the slit reads the column it says it does,
+> bitwise, and a slit one pixel out is caught (`--slit`); and nine deliberate perturbations
+> of the model are asserted to make those checks *fail* (`--negative`). All thirteen controls
 > are proven to change the picture (`tools/sweep.py`), and the bundle registers,
 > instantiates and renders 120 frames in the fleet's `oxbow` host.
 > **It has never been loaded into Resolume.** The last step of proof is a screenshot
@@ -103,10 +104,10 @@ is their speed.</sub>
   headless GL context, plus one load in the fleet's own [oxbow](https://github.com/stoatworks-labs/oxbow)
   host, which confirms it registers, instantiates and renders as `SW Photofinish` / `PF01`
   / effect.
-- 84 assertions across eleven check suites, all passing (`tools/verify.sh`, ~15 s). Every
-  tolerance is derived from a lattice — one column, one source frame, one 8-bit code value
-  — rather than fitted to a rendered number, and eight negative controls prove the checks
-  can fail. The audit of every one of them is in `AGENTS.md`.
+- 93 assertions across twelve check suites, all passing (`tools/verify.sh`, ~15 s). Every
+  tolerance is derived from a lattice — one column, one row, one source frame, one 8-bit
+  code value — rather than fitted to a rendered number, and nine negative controls prove
+  the checks can fail. The audit of every one of them is in `AGENTS.md`.
 - Measured on macOS (Apple Silicon) only: **0.17 ms/frame at 720p, 0.27 at 1080p, 0.96 at
   4K** — and 0.20 / 0.29 / 1.03 at the fastest column rate, which is thirty-three one-pixel
   draws a frame instead of four. Never run on Windows, on Intel, or on a rasteriser without
@@ -152,7 +153,7 @@ The offline harness renders the real plugin class headlessly and measures it:
     ./build/pftest --list                                           # every control and its range
     ./build/pftest --schedule                                       # when a column is taken; no GL at all
     ./build/pftest --static --ring --clock                          # three bitwise claims
-    ./build/pftest --width --matched --reverse --sync                # the closed forms
+    ./build/pftest --width --matched --reverse --sync --slit         # the closed forms
     ./build/pftest --negative                                       # those checks, perturbed, must fail
     ./build/pftest --bench --frames 200                             # 720p through 4K
     python3 tools/sweep.py                                          # no control is silently dead

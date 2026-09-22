@@ -33,6 +33,9 @@
 #               pixels at two rasters.
 #   reverse     the other way round comes out mirrored, measured as skewness.
 #   sync        one whole sweep per bar, and per beat, at two ring lengths.
+#   slit        the slit reads the column it says it does. The only check here
+#               that measures SPACE rather than time -- a slit reading the
+#               wrong column would pass every other one.
 #   resize      a composition that changes resolution mid-take does not leak a
 #               freshly-cleared frame copy into the ring.
 #   negative    every check above, perturbed, asserted to FAIL. A check that
@@ -175,7 +178,8 @@ step "checks"
 # One process, so the GL context is stood up once. Each check prints its own
 # numbers; the summary here is the verdict.
 if "$PFTEST" --schedule --static --ring --clock --interp --width --matched \
-             --reverse --sync --resize --negative > /tmp/photofinish-checks.txt 2>&1; then
+             --reverse --sync --slit --resize --negative \
+             > /tmp/photofinish-checks.txt 2>&1; then
 	grep -c '^   ok' /tmp/photofinish-checks.txt \
 		| xargs -I{} printf '   {} assertions passed (full output: /tmp/photofinish-checks.txt)\n'
 	pass "every closed-form check"
