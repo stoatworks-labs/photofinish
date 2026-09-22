@@ -1,0 +1,11 @@
+{
+  "name": "photofinish",
+  "version-string": "0.1.0",
+  "description": "Dependencies for building the Photofinish FFGL plugin. GLEW is only needed on Windows; macOS uses the system OpenGL framework. There are no other dependencies: the ring is an FBO, the schedule is arithmetic, and the harness's PNG writer uses the zlib that ships with the OS.",
+  "dependencies": [
+    {
+      "name": "glew",
+      "platform": "!osx"
+    }
+  ]
+}
