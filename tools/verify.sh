@@ -32,6 +32,7 @@
 #   matched     at the film speed, the object's own proportions, in absolute
 #               pixels at two rasters.
 #   reverse     the other way round comes out mirrored, measured as skewness.
+#   sync        one whole sweep per bar, and per beat, at two ring lengths.
 #   negative    every check above, perturbed, asserted to FAIL. A check that
 #               cannot fail is not a check.
 #   sweep       no control is silently dead. A GLSL uniform whose name does not
@@ -172,7 +173,7 @@ step "checks"
 # One process, so the GL context is stood up once. Each check prints its own
 # numbers; the summary here is the verdict.
 if "$PFTEST" --schedule --static --ring --clock --interp --width --matched \
-             --reverse --negative > /tmp/photofinish-checks.txt 2>&1; then
+             --reverse --sync --negative > /tmp/photofinish-checks.txt 2>&1; then
 	grep -c '^   ok' /tmp/photofinish-checks.txt \
 		| xargs -I{} printf '   {} assertions passed (full output: /tmp/photofinish-checks.txt)\n'
 	pass "every closed-form check"

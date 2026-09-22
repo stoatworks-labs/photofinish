@@ -1791,6 +1791,89 @@ int runReverse()
 }
 
 //---------------------------------------------------------------------------
+// --sync. One whole sweep per bar, and per beat.
+//
+// Closed form and raster-independent: Sync derives the column period from the
+// tempo and the ring's length, so a sweep takes exactly one bar however long
+// the ring is. The host is never asked for a bar PHASE -- only its tempo --
+// which is why this holds on a host that never calls SetBeatInfo (the SDK
+// defaults to 120 bpm) as well as on one that does.
+//---------------------------------------------------------------------------
+bool syncCase( int width, int height, int sync, double sweepSeconds, const char* label )
+{
+	//How many frame intervals one sweep is, at the harness's 60 fps.
+	const int intervals = static_cast< int >( std::lround( sweepSeconds * 60.0 ) );
+
+	for( int shortOfOne = 0; shortOfOne <= 1; ++shortOfOne )
+	{
+		Rig rig;
+		if( !rig.begin( width, height ) )
+			return false;
+
+		rig.set( "Sync", static_cast< float >( sync ) );
+		rig.set( "Sweep Length", 1.0f );
+		rig.set( "Fill", static_cast< float >( kFillBuild ) );
+		//Deliberately at the far end of its range, to show that Sync overrides
+		//it: at 500 ms a column this would produce two columns in the whole
+		//take rather than a sweep.
+		rig.set( "Time Per Column", 1.0f );
+
+		//frame 0 produces nothing, so `intervals + 1` frames is `intervals`
+		//frame intervals.
+		const int frames = intervals + 1 - shortOfOne;
+		for( int k = 0; k < frames; ++k )
+			if( !rig.frame( k, flatFrame( width, height, 200, 120, 60 ) ) )
+				return false;
+
+		const int L      = rig.plugin.RingLengthForTest();
+		const int filled = rig.plugin.FilledForTest();
+
+		std::printf( "   %s %s %d frames: %d of %d columns\n", label,
+		             shortOfOne ? "one short of a sweep," : "exactly one sweep,  ", frames - 1,
+		             filled, L );
+
+		if( shortOfOne )
+			check( filled < L, std::string( label ) + " is NOT yet full one frame short" );
+		else
+			check( filled == L, std::string( label ) + " fills the strip in exactly one sweep" );
+	}
+
+	return true;
+}
+
+int runSync()
+{
+	std::printf( "== sync: one whole sweep per bar, and per beat\n" );
+
+	//The SDK's default tempo, which is what a host that never calls
+	//SetBeatInfo leaves in place: 120 bpm, so a bar is two seconds.
+	constexpr double kBar = 2.0;
+
+	struct Case
+	{
+		int width, height;
+		int sync;
+		double sweepSeconds;
+		const char* label;
+	};
+	const Case cases[] = {
+		{ 320, 180, kSyncBar, kBar, "320x180  bar " },
+		{ 320, 180, kSyncBeat, kBar / 4.0, "320x180  beat" },
+		//A different raster, so the ring is a different length and the derived
+		//column period is a different number -- the sweep still takes one bar.
+		{ 1024, 576, kSyncBar, kBar, "1024x576 bar " },
+	};
+
+	for( const Case& c : cases )
+		if( !syncCase( c.width, c.height, c.sync, c.sweepSeconds, c.label ) )
+			return 1;
+
+	headline( "sync", "sweeps per bar at two ring lengths",
+	          "exactly 1, with Time Per Column at its slowest" );
+	return 0;
+}
+
+//---------------------------------------------------------------------------
 // --negative. The checks above can actually fail.
 //
 // A check that cannot fail is not a check. Each of these perturbs the model or
@@ -1974,11 +2057,19 @@ int runNegative()
 //---------------------------------------------------------------------------
 // --bench
 //---------------------------------------------------------------------------
-double benchAt( int width, int height, int frames )
+double benchAt( int width, int height, int frames,
+                const std::vector< std::pair< std::string, float > >& settings )
 {
 	Rig rig;
 	if( !rig.begin( width, height ) )
 		return 0.0;
+
+	//--set applies to the bench as well as to a render, because the cost of
+	//this plugin is one draw per COLUMN and the column rate is a control. A
+	//figure measured only at the default rate would understate the fastest
+	//setting by a factor of eight.
+	for( const auto& s : settings )
+		rig.set( s.first, s.second );
 
 	const Frame source = demoCard( width, height, 0 );
 
@@ -2001,7 +2092,7 @@ double benchAt( int width, int height, int frames )
 	       / static_cast< double >( frames );
 }
 
-int runBench( int frames )
+int runBench( int frames, const std::vector< std::pair< std::string, float > >& settings )
 {
 	struct Size
 	{
@@ -2019,7 +2110,7 @@ int runBench( int frames )
 
 	for( const Size& s : sizes )
 	{
-		const double ms = benchAt( s.width, s.height, frames );
+		const double ms = benchAt( s.width, s.height, frames, settings );
 		std::printf( "%s    %7.3f       %8.0f            %5.1f%%\n", s.name, ms,
 		             ms > 0.0 ? 1000.0 / ms : 0.0, ms / 16.667 * 100.0 );
 	}
@@ -2053,6 +2144,7 @@ void usage()
 		"  --width           a moving bar's rendered width, against b*c/v\n"
 		"  --matched         at the film speed, the object's own proportions\n"
 		"  --reverse         the other way round comes out mirrored\n"
+		"  --sync            one whole sweep per bar, and per beat\n"
 		"  --negative        every check above can actually fail\n"
 		"  --bench           time ProcessOpenGL at 720p, 1080p and 4K\n"
 		"  --help\n" );
@@ -2098,6 +2190,7 @@ int main( int argc, char** argv )
 	bool wantWidth    = false;
 	bool wantMatched  = false;
 	bool wantReverse  = false;
+	bool wantSync     = false;
 	bool wantNegative = false;
 	bool wantBench    = false;
 
@@ -2153,6 +2246,8 @@ int main( int argc, char** argv )
 			wantMatched = true;
 		else if( argument == "--reverse" )
 			wantReverse = true;
+		else if( argument == "--sync" )
+			wantSync = true;
 		else if( argument == "--negative" )
 			wantNegative = true;
 		else if( argument == "--bench" )
@@ -2174,7 +2269,7 @@ int main( int argc, char** argv )
 	//No GL needed, so it is answered before a context is made -- which means
 	//it still works on a machine where creating one fails, and in CI.
 	if( wantSchedule && !wantStatic && !wantRing && !wantClock && !wantInterp && !wantWidth
-	    && !wantMatched && !wantReverse && !wantNegative && !wantBench )
+	    && !wantMatched && !wantReverse && !wantSync && !wantNegative && !wantBench )
 	{
 		runSchedule();
 		printSummary();
@@ -2208,7 +2303,7 @@ int main( int argc, char** argv )
 	};
 
 	const bool anyCheck = wantSchedule || wantStatic || wantRing || wantClock || wantInterp
-	                      || wantWidth || wantMatched || wantReverse || wantNegative;
+	                      || wantWidth || wantMatched || wantReverse || wantSync || wantNegative;
 
 	if( anyCheck )
 	{
@@ -2228,6 +2323,8 @@ int main( int argc, char** argv )
 			runMatched();
 		if( wantReverse )
 			runReverse();
+		if( wantSync )
+			runSync();
 		if( wantNegative )
 			runNegative();
 
@@ -2238,7 +2335,21 @@ int main( int argc, char** argv )
 	}
 
 	if( wantBench )
-		return finish( runBench( frames ) );
+	{
+		std::vector< std::pair< std::string, float > > parsed;
+		for( const std::string& setting : settings )
+		{
+			const size_t equals = setting.find( '=' );
+			if( equals == std::string::npos )
+			{
+				std::fprintf( stderr, "--set wants Name=Value\n" );
+				return finish( 2 );
+			}
+			parsed.emplace_back( setting.substr( 0, equals ),
+			                     std::strtof( setting.substr( equals + 1 ).c_str(), nullptr ) );
+		}
+		return finish( runBench( frames, parsed ) );
+	}
 
 	//--list and --out both need a plugin instance.
 	Rig rig;
