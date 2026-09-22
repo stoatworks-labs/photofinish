@@ -340,7 +340,7 @@ comfortably inside it.
 | `--schedule` | columns produced over 600 frames `== floor( intervals · c )` | **None — exact equality.** A column is taken every time the running total crosses a whole number, so after `N` columns' worth of time exactly `floor( N )` have been taken | Yes — **no GL at all**. This is the one check a runner with no context can still run | Yes — no raster |
 | `--static` | every sample along the time axis equals the first, **bitwise** | **Zero.** Two columns of a still subject are not close, they are the same arithmetic on the same numbers; `texelFetch` keeps the sampler out of it even when magnifying | Yes. No filtered fetch is involved on the path under test | **Run at 320×180, 640×360 and 1280×720**, at 1:1 and magnified, on both axes |
 | `--ring` | column `i` holds frame `N − L + i`, **bitwise** | **Zero.** Flat fields carrying their own index: 8 bits in, 8 bits stored, 8 bits out, and the slit's position and the source's filtering are out of the question | Yes | **Run at 320×180, 640×360 and 1024×576**, including a magnifying Sweep Length where one ring column covers several output pixels — the raster-sensitive part of the whole plugin |
-| `--clock` | the same take from t=0 and from 499,217,238 ms, **bitwise** | **Zero** | Yes | Run at one raster; the quantity under test is a `double`, not a pixel |
+| `--clock` | the same take from t=0 and from 499,217,238 ms, **bitwise** | **Zero** | Yes | Run at one raster; the quantity under test is a `double`, not a pixel. Note what it is: a CONSISTENCY check. Both runs being equally wrong would pass it, which is why `--ring` runs the same rig first and is what says the strip is right at all |
 | `--interp` | a column at blend `k/4` equals `lerp( was, now, k/4 )` | **One 8-bit code value**, from the ring's storage format. The two fields are 40 and 200 so every quarter blend is an exact code and the expectation is an integer | Yes. Flat fields, so no interpolation of the *source* happens anywhere | Run at 320×180 and 1280×720 |
 | `--width` | integrated coverage `== b · c / v` | **One column**, which is the finest thing a strip can represent. The analytic quantisation bound is printed and asserted to be under a quarter of it; worst observed **0.122** | Yes. The measurement is a sum of code values; the bar's ramps are one column period wide, which makes the sum a partition of unity and so exact for every sampling phase | **Run at 320×180 and 1280×720**, at four column rates, under both interpolation modes, and including a non-integer speed so nothing can be passing by landing on whole pixels |
 | `--matched` | rendered width `== b`, in absolute pixels | **One column**, as above; analytic bound **0.220** at the fastest rate | Yes | **Run at 320×180 and 1280×720 with the SAME absolute pixel sizes** — a 64-pixel object must come out 64 pixels wide at both |
@@ -423,6 +423,19 @@ has gone soft and the number it prints means nothing.
   with no meaning that was nonetheless close enough to look like a pass on the
   slower ones. They now plan the take so the ring cannot wrap, and say so
   loudly if it does.
+
+### One thing the audit did check, by breaking the plugin
+
+A check that runs a *copy* of the code proves nothing about what ships. The
+harness drives the real `Photofinish` class and the real `Shaders.cpp` strings,
+and that was confirmed rather than assumed: adding `+ 1` to the strip pass's
+ring index — one character in the shipped GLSL — fails five of `--ring`'s eight
+configurations. Nothing was left behind; it is recorded here so the next person
+does not have to wonder.
+
+`--clock` passes under that mutation, and correctly: both runs are equally
+wrong, so they are still identical. It is a consistency check, not a
+correctness one, and `--ring` is what says the strip is right at all.
 
 ### What this audit does NOT cover
 
