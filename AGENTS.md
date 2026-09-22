@@ -454,7 +454,7 @@ has gone soft and the number it prints means nothing.
   8 configurations at 3 rasters, including a magnifying Sweep Length, both
   fill modes, reversed, and the partly-filled case.
 - **The rendered width follows `b · c / v`** to 0.016 columns, against a
-  tolerance of one column and an analytic quantisation bound of 0.110.
+  tolerance of one column and an analytic quantisation bound of 0.122.
 - **An object at the film speed keeps its own proportions** to 0.031 columns,
   and one at twice the film speed comes out at 0.5002 of its width.
 - **The two directions are mirror images** — skewness matches the object's own
