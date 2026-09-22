@@ -730,8 +730,43 @@ Moments rowMoments( const Frame& image, int width, int y )
 
 //---------------------------------------------------------------------------
 // Reporting.
+//
+// Every check also files ONE headline number, and they are printed together at
+// the end. That block is what goes in a report and in AGENTS.md: a run that
+// only says "all checks passed" tells you nothing about how much margin there
+// was, and margin is the only thing that says whether a tolerance is honest.
 //---------------------------------------------------------------------------
 int g_failures = 0;
+
+struct Headline
+{
+	std::string check;
+	std::string what;
+	std::string value;
+};
+std::vector< Headline > g_headlines;
+
+void headline( const char* check, const char* what, const std::string& value )
+{
+	g_headlines.push_back( Headline { check, what, value } );
+}
+
+std::string figure( const char* format, double value )
+{
+	char buffer[ 128 ] {};
+	std::snprintf( buffer, sizeof( buffer ), format, value );
+	return buffer;
+}
+
+void printSummary()
+{
+	if( g_headlines.empty() )
+		return;
+
+	std::printf( "\n== summary: the headline number from every check\n" );
+	for( const Headline& h : g_headlines )
+		std::printf( "   %-10s %-40s %s\n", h.check.c_str(), h.what.c_str(), h.value.c_str() );
+}
 
 void ok( const char* what )
 {
@@ -757,6 +792,8 @@ void check( bool condition, const std::string& what )
 // taken, and it is the one part of the plugin a runner with no GPU can still
 // prove.
 //---------------------------------------------------------------------------
+double g_scheduleWorst = 0.0;
+
 int runSchedule()
 {
 	std::printf( "== schedule: when a column is taken\n" );
@@ -809,16 +846,24 @@ int runSchedule()
 			}
 		}
 
-		//Frame 0 has no previous frame, so 599 frame intervals elapse.
-		const double expected = c.columnsPerFrame * ( frames - 1 );
-		const double error    = std::fabs( static_cast< double >( total ) - expected );
+		//Frame 0 has no previous frame, so 599 frame intervals elapse, and
+		//the count is EXACT rather than within a tolerance: a column is taken
+		//every time the running total crosses a whole number, so after
+		//`intervals * c` columns' worth of time exactly floor( intervals * c )
+		//of them have been taken. Asserting the floor rather than "within one
+		//column of the product" is the difference between a check that would
+		//catch a systematically dropped column and one that would not.
+		const double exactly  = c.columnsPerFrame * ( frames - 1 );
+		const long long want  = static_cast< long long >( std::floor( exactly + strip::kColumnSnap ) );
+		const long long error = total - want;
 
-		std::printf( "   %s  %6lld columns, want %8.2f, out by %.2f  (per frame %d..%d)\n",
-		             c.name, total, expected, error, perFrameMin, perFrameMax );
+		std::printf( "   %s  %6lld columns, want exactly %6lld (%8.2f of them elapsed), out by %lld"
+		             "  (per frame %d..%d)\n",
+		             c.name, total, want, exactly, error, perFrameMin, perFrameMax );
 
-		//ONE COLUMN, from the lattice: the count can only be out by the
-		//fractional column left in the phase at the end of the run.
-		check( error <= 1.0, std::string( "rate holds: " ) + c.name );
+		check( error == 0, std::string( "rate holds exactly: " ) + c.name );
+		g_scheduleWorst = std::max( g_scheduleWorst,
+		                            static_cast< double >( std::llabs( error ) ) );
 	}
 
 	//The regression guard for the snap. With tpc exactly a frame period every
@@ -858,6 +903,8 @@ int runSchedule()
 		check( exact, "four columns in a frame fall at 0.25, 0.50, 0.75 and 1.00 of it" );
 	}
 
+	headline( "schedule", "column-count error over 600 frames",
+	          figure( "%.0f", g_scheduleWorst ) + " columns (exact, no tolerance)" );
 	return 0;
 }
 
@@ -869,6 +916,9 @@ int runSchedule()
 // are equal. The strip pass reads the ring with texelFetch, so no sampler is
 // involved even at a magnifying Sweep Length.
 //---------------------------------------------------------------------------
+int g_staticWorst = 0;
+int g_staticCases = 0;
+
 bool staticAt( int width, int height, float sweepLength, float slitWidth, float slitAngle,
                bool vertical, const char* label )
 {
@@ -940,6 +990,8 @@ bool staticAt( int width, int height, float sweepLength, float slitWidth, float 
 	             label, compared, worst,
 	             worstAt >= 0 && worst > 0 ? "" : "" );
 	check( worst == 0, std::string( label ) + " is bitwise constant along the time axis" );
+	g_staticWorst = std::max( g_staticWorst, worst );
+	++g_staticCases;
 	return true;
 }
 
@@ -971,6 +1023,9 @@ int runStatic()
 		if( !staticAt( c.width, c.height, c.sweep, c.slitWidth, c.slitAngle, c.vertical, c.label ) )
 			return 1;
 
+	headline( "static", "worst difference along the time axis",
+	          std::to_string( g_staticWorst ) + " code values, over "
+	              + std::to_string( g_staticCases ) + " configurations at 3 rasters" );
 	return 0;
 }
 
@@ -1076,6 +1131,9 @@ std::vector< int > expectedStamps( int width, int L, int columns, int fill, bool
 	return want;
 }
 
+int g_ringWrong = 0;
+int g_ringCases = 0;
+
 bool ringCase( int width, int height, float sweepLength, int fill, bool reversed, int frames,
                const char* label )
 {
@@ -1109,6 +1167,8 @@ bool ringCase( int width, int height, float sweepLength, int fill, bool reversed
 	std::printf( "\n" );
 
 	check( wrong == 0, std::string( label ) + " holds the right frames in the right order" );
+	g_ringWrong = std::max( g_ringWrong, wrong );
+	++g_ringCases;
 	return true;
 }
 
@@ -1165,6 +1225,9 @@ int runRing()
 		check( ascending, "Once holds frames 1..L in order, left to right" );
 	}
 
+	headline( "ring", "columns filed under the wrong frame",
+	          std::to_string( g_ringWrong ) + " of the strip, over "
+	              + std::to_string( g_ringCases ) + " configurations at 3 rasters" );
 	return 0;
 }
 
@@ -1221,6 +1284,10 @@ int runClock()
 		const Frame pa = a.read();
 		const Frame pb = b.read();
 		check( pa == pb, "the same holds at the fastest column rate, 33 columns a frame" );
+
+		headline( "clock", "columns differing at t=499,217,238 ms",
+		          std::to_string( wrong ) + " of " + std::to_string( fromZero.stamps.size() )
+		              + ", and the fastest rate is bit-identical too" );
 	}
 
 	return 0;
@@ -1251,6 +1318,8 @@ int runInterp()
 		{ 320, 180, "320x180 " },
 		{ 1280, 720, "1280x720" },
 	};
+
+	int worstOverall = 0;
 
 	for( const Case& raster : rasters )
 	{
@@ -1310,9 +1379,13 @@ int runInterp()
 			check( worst <= kCodeTolerance,
 			       std::string( raster.label ) + ( linear ? " linear" : " nearest" )
 			           + " matches the closed form to one code value" );
+			worstOverall = std::max( worstOverall, worst );
 		}
 	}
 
+	headline( "interp", "worst error against the closed form",
+	          std::to_string( worstOverall ) + " code values (tolerance "
+	              + std::to_string( kCodeTolerance ) + ", from the 8-bit ring)" );
 	return 0;
 }
 
@@ -1447,6 +1520,9 @@ int runWidth()
 		{ 1280, 720, 4.0, 5.0, 320.0, "1280x720 c=4   v=5   " },
 	};
 
+	double worstError  = 0.0;
+	double worstBudget = 0.0;
+
 	for( const WidthCase& c : cases )
 	{
 		WidthResult r;
@@ -1463,8 +1539,15 @@ int runWidth()
 		       std::string( c.label ) + " is within one column of b*c/v" );
 		check( r.budget < kColumnTolerance * 0.25,
 		       std::string( c.label ) + " quantisation budget is well inside the tolerance" );
+
+		worstError  = std::max( worstError, error );
+		worstBudget = std::max( worstBudget, r.budget );
 	}
 
+	headline( "width", "worst error against b*c/v",
+	          figure( "%.3f", worstError ) + " col (tolerance "
+	              + figure( "%.2f", kColumnTolerance ) + ", quantisation bound "
+	              + figure( "%.3f", worstBudget ) + ")" );
 	return 0;
 }
 
@@ -1476,6 +1559,9 @@ int runWidth()
 // column is an output pixel -- so a 64-pixel object comes out 64 pixels wide,
 // at any raster, which is what "true proportions" means.
 //---------------------------------------------------------------------------
+double g_matchedWorst  = 0.0;
+double g_matchedBudget = 0.0;
+
 int runMatched()
 {
 	std::printf( "== matched: at the film speed, the object's own proportions\n" );
@@ -1507,6 +1593,9 @@ int runMatched()
 		       std::string( c.label ) + " renders at its own width to within one column" );
 		check( r.budget < kColumnTolerance * 0.25,
 		       std::string( c.label ) + " quantisation budget is well inside the tolerance" );
+
+		g_matchedWorst  = std::max( g_matchedWorst, error );
+		g_matchedBudget = std::max( g_matchedBudget, r.budget );
 	}
 
 	//And the point of the whole thing: an object NOT at the film speed does
@@ -1524,6 +1613,10 @@ int runMatched()
 		       "twice the film speed squashes the object to half its width" );
 	}
 
+	headline( "matched", "worst error against the object's width",
+	          figure( "%.3f", g_matchedWorst ) + " col (tolerance "
+	              + figure( "%.2f", kColumnTolerance ) + ", quantisation bound "
+	              + figure( "%.3f", g_matchedBudget ) + ")" );
 	return 0;
 }
 
@@ -1570,6 +1663,9 @@ int runReverse()
 		{ 320, 180, 4.0, 2.0, 80.0, "320x180 " },
 		{ 1280, 720, 4.0, 8.0, 320.0, "1280x720" },
 	};
+
+	double worstError = 0.0;
+	double worstBound = 0.0;
 
 	for( const Case& c : cases )
 	{
@@ -1682,8 +1778,15 @@ int runReverse()
 		//and nothing else.
 		check( std::fabs( widths[ 0 ] - widths[ 1 ] ) <= kColumnTolerance,
 		       std::string( c.label ) + " reversing does not change the rendered width" );
+
+		for( int i = 0; i < 3; ++i )
+			worstError = std::max( worstError, std::fabs( measured[ i ] - runs[ i ].expect ) );
+		worstBound = std::max( worstBound, derived );
 	}
 
+	headline( "reverse", "worst skew error against the object",
+	          figure( "%.4f", worstError ) + " (tolerance " + figure( "%.2f", kSkewTolerance )
+	              + ", lattice bound " + figure( "%.4f", worstBound ) + ")" );
 	return 0;
 }
 
@@ -1697,6 +1800,8 @@ int runReverse()
 int runNegative()
 {
 	std::printf( "== negative: the checks can fail\n" );
+
+	const int failuresBefore = g_failures;
 
 	//1. A column rate 15% out. The width check must reject it.
 	{
@@ -1861,6 +1966,8 @@ int runNegative()
 		       "the schedule check rejects a 15% error in the column period" );
 	}
 
+	headline( "negative", "perturbations correctly rejected",
+	          std::to_string( 7 - ( g_failures - failuresBefore ) ) + " of 7" );
 	return 0;
 }
 
@@ -2070,6 +2177,7 @@ int main( int argc, char** argv )
 	    && !wantMatched && !wantReverse && !wantNegative && !wantBench )
 	{
 		runSchedule();
+		printSummary();
 		std::printf( "\n%s\n", g_failures == 0 ? "all checks passed" : "FAILURES above" );
 		return g_failures == 0 ? 0 : 1;
 	}
@@ -2123,6 +2231,7 @@ int main( int argc, char** argv )
 		if( wantNegative )
 			runNegative();
 
+		printSummary();
 		std::printf( "\n%s\n", g_failures == 0 ? "all checks passed"
 		                                       : "FAILURES above" );
 		return finish( g_failures == 0 ? 0 : 1 );
