@@ -249,6 +249,15 @@ moment between" and "a blend of two frames" are the same thing. The regime
 where they differ is not checked because there is no right answer to check
 against.
 
+What *is* checked is that the width relation does not care which mode is on.
+Over one frame the blends are `1/c, 2/c … 1`, so the frame contributes
+`c − (c+1)/2` of the previous picture and `(c+1)/2` of this one, and those sum
+to `c` — interpolating between two frames preserves the integral exactly. Two
+of `--width`'s cases run under `Linear` and come out at 0.012 of a column
+against 0.016 for `Nearest`. That is worth demonstrating rather than asserting,
+because it is the reason the check is allowed to use the mode where the
+arithmetic is simplest.
+
 **When the column period is LONGER than a frame, columns simply do not
 advance.** The spec says "columns repeat"; what that means here is that the
 strip stands still for a frame or two and then moves on, rather than the same
@@ -333,7 +342,7 @@ comfortably inside it.
 | `--ring` | column `i` holds frame `N − L + i`, **bitwise** | **Zero.** Flat fields carrying their own index: 8 bits in, 8 bits stored, 8 bits out, and the slit's position and the source's filtering are out of the question | Yes | **Run at 320×180, 640×360 and 1024×576**, including a magnifying Sweep Length where one ring column covers several output pixels — the raster-sensitive part of the whole plugin |
 | `--clock` | the same take from t=0 and from 499,217,238 ms, **bitwise** | **Zero** | Yes | Run at one raster; the quantity under test is a `double`, not a pixel |
 | `--interp` | a column at blend `k/4` equals `lerp( was, now, k/4 )` | **One 8-bit code value**, from the ring's storage format. The two fields are 40 and 200 so every quarter blend is an exact code and the expectation is an integer | Yes. Flat fields, so no interpolation of the *source* happens anywhere | Run at 320×180 and 1280×720 |
-| `--width` | integrated coverage `== b · c / v` | **One column**, which is the finest thing a strip can represent. The analytic quantisation bound is printed and asserted to be under a quarter of it; worst observed **0.110** | Yes. The measurement is a sum of code values; the bar's ramps are one column period wide, which makes the sum a partition of unity and so exact for every sampling phase | **Run at 320×180 and 1280×720**, at four column rates, including a non-integer speed so nothing can be passing by landing on whole pixels |
+| `--width` | integrated coverage `== b · c / v` | **One column**, which is the finest thing a strip can represent. The analytic quantisation bound is printed and asserted to be under a quarter of it; worst observed **0.110** | Yes. The measurement is a sum of code values; the bar's ramps are one column period wide, which makes the sum a partition of unity and so exact for every sampling phase | **Run at 320×180 and 1280×720**, at four column rates, under both interpolation modes, and including a non-integer speed so nothing can be passing by landing on whole pixels |
 | `--matched` | rendered width `== b`, in absolute pixels | **One column**, as above; analytic bound **0.220** at the fastest rate | Yes | **Run at 320×180 and 1280×720 with the SAME absolute pixel sizes** — a 64-pixel object must come out 64 pixels wide at both |
 | `--reverse` | skewness of the strip `== ∓` skewness of the object | **0.03**, stated. The *derived* part — the worst that sampling the object's profile on the strip's own column lattice can move its skewness, maximised over 64 phases — is computed each run and asserted to be inside it; it comes out **0.0001** | Yes. Skewness is dimensionless and invariant under the stretch, translation and scaling the strip applies, so the expected number is a property of the object alone. The expected value is obtained by integrating *the same function the card is drawn from*, never a constant typed in | Run at 320×180 and 1280×720 |
 | `--sync` | one whole sweep per bar, and per beat | **Exact**: full one frame after a bar, not full one frame before | Yes | **Run at two ring lengths** (320 and 1024), so the derived column period is a different number each time |
@@ -436,7 +445,7 @@ has gone soft and the number it prints means nothing.
 **Verified, by measurement, on this machine (Apple Silicon, macOS 26.4,
 `4.1 Metal - 90.5`):**
 
-- **95 assertions**, all passing, across twelve check suites. The headline numbers
+- **99 assertions**, all passing, across twelve check suites. The headline numbers
   are in the table above and `tools/verify.sh` prints them on every run.
 - **A still picture renders as bitwise-constant streaks** — 0 code values of
   difference over 2.3 million samples, at three rasters, at 1:1 and magnified,

@@ -1444,6 +1444,15 @@ struct WidthCase
 	double speed;          ///< v, source pixels per frame, signed
 	double barWidth;       ///< b, source pixels
 	const char* label;
+
+	/// Nearest by default. Linear is checked too, and it must give the SAME
+	/// answer: over one frame the blends are 1/c, 2/c ... 1, so the frame
+	/// contributes ( c - (c+1)/2 ) of the previous picture and ( c+1 )/2 of
+	/// this one, and those sum to c. Interpolating between two frames
+	/// preserves the integral exactly -- which is worth demonstrating rather
+	/// than asserting, because it is the reason this check is allowed to use
+	/// the mode where the arithmetic is simplest.
+	int interpolate = kInterpolateNearest;
 };
 
 struct WidthResult
@@ -1508,7 +1517,7 @@ bool measureWidth( const WidthCase& c, WidthResult& result, bool reversedDirecti
 	rig.set( "Sweep Length", 1.0f );
 	rig.set( "Fill", static_cast< float >( kFillBuild ) );
 	rig.set( "Direction", reversedDirection ? 1.0f : 0.0f );
-	rig.set( "Interpolate", static_cast< float >( kInterpolateNearest ) );
+	rig.set( "Interpolate", static_cast< float >( c.interpolate ) );
 	rig.set( "Background", static_cast< float >( kBackgroundBlack ) );
 	rig.set( "Mix", 1.0f );
 
@@ -1562,6 +1571,10 @@ int runWidth()
 		{ 1280, 720, 1.0, 8.0, 320.0, "1280x720 c=1   v=8   " },
 		{ 1280, 720, 4.0, 8.0, 320.0, "1280x720 c=4   v=8   " },
 		{ 1280, 720, 4.0, 5.0, 320.0, "1280x720 c=4   v=5   " },
+		//The same relation under LINEAR interpolation, which must give the
+		//same answer: see WidthCase::interpolate.
+		{ 320, 180, 4.0, 2.0, 80.0, "320x180  c=4   v=2   linear", kInterpolateLinear },
+		{ 1280, 720, 4.0, 5.0, 320.0, "1280x720 c=4   v=5   linear", kInterpolateLinear },
 	};
 
 	double worstError  = 0.0;

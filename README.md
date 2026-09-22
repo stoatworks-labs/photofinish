@@ -104,7 +104,7 @@ is their speed.</sub>
   headless GL context, plus one load in the fleet's own [oxbow](https://github.com/stoatworks-labs/oxbow)
   host, which confirms it registers, instantiates and renders as `SW Photofinish` / `PF01`
   / effect.
-- 95 assertions across twelve check suites, all passing (`tools/verify.sh`, ~15 s). Every
+- 99 assertions across twelve check suites, all passing (`tools/verify.sh`, ~15 s). Every
   tolerance is derived from a lattice — one column, one row, one source frame, one 8-bit
   code value — rather than fitted to a rendered number, and nine negative controls prove
   the checks can fail. The audit of every one of them is in `AGENTS.md`.
