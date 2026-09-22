@@ -546,6 +546,11 @@ struct Rig
 	GLuint outputTexture = 0;
 	GLuint outputFBO     = 0;
 
+	/// The INPUT's size, which a host is entitled to change without changing
+	/// the output's. Defaults to the output's.
+	int srcWidth  = 0;
+	int srcHeight = 0;
+
 	FFGLTextureStruct inputStruct {};
 	FFGLTextureStruct* inputs[ 1 ] {};
 	ProcessOpenGLStruct process {};
@@ -571,6 +576,9 @@ struct Rig
 			return false;
 		}
 
+		srcWidth  = w;
+		srcHeight = h;
+
 		const Frame empty = blackFrame( w, h );
 		sourceTexture     = makeTexture( w, h, empty.data() );
 		outputTexture     = makeTexture( w, h, nullptr );
@@ -587,6 +595,23 @@ struct Rig
 
 		started = true;
 		return true;
+	}
+
+	/// Hand the plugin a DIFFERENTLY SIZED input from here on. A host does this
+	/// whenever the composition's resolution changes, and it is the one moment
+	/// the two frame copies are reallocated -- which clears them, so whichever
+	/// held the previous frame is suddenly black.
+	void resizeSource( int w, int h )
+	{
+		glDeleteTextures( 1, &sourceTexture );
+		const Frame empty = blackFrame( w, h );
+		sourceTexture     = makeTexture( w, h, empty.data() );
+		srcWidth          = w;
+		srcHeight         = h;
+
+		inputStruct.Width = inputStruct.HardwareWidth = static_cast< FFUInt32 >( w );
+		inputStruct.Height = inputStruct.HardwareHeight = static_cast< FFUInt32 >( h );
+		inputStruct.Handle                              = sourceTexture;
 	}
 
 	bool set( const std::string& name, float value )
@@ -611,7 +636,7 @@ struct Rig
 		plugin.SetTime( clockOrigin + static_cast< double >( index ) / fps );
 
 		glBindTexture( GL_TEXTURE_2D, sourceTexture );
-		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE,
+		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, srcWidth, srcHeight, GL_RGBA, GL_UNSIGNED_BYTE,
 		                 source.data() );
 		glBindTexture( GL_TEXTURE_2D, 0 );
 
@@ -1791,6 +1816,90 @@ int runReverse()
 }
 
 //---------------------------------------------------------------------------
+// --resize. A composition that changes resolution mid-take.
+//
+// The narrowest check here and the one with the least obvious failure. When
+// the picture's size changes, both frame copies are reallocated -- and a
+// reallocated buffer is CLEARED, so whichever of the two held the previous
+// frame is suddenly black. Every column taken in that one frame is then
+// blended towards black, which at the fastest column rate is a third of the
+// ring, once, and reads as a single dark band nobody can account for.
+//
+// A flat white field before and after, so the only thing that can darken a
+// column is the reseeding failing.
+//---------------------------------------------------------------------------
+int runResize()
+{
+	std::printf( "== resize: a composition that changes resolution mid-take\n" );
+
+	Rig rig;
+	if( !rig.begin( 320, 180 ) )
+		return 1;
+
+	rig.set( "Fill", static_cast< float >( kFillBuild ) );
+	rig.set( "Interpolate", static_cast< float >( kInterpolateLinear ) );
+	rig.set( "Mix", 1.0f );
+	//Eight columns a frame, so a frame that goes wrong takes eight columns
+	//with it and the band is impossible to miss.
+	rig.plugin.SetColumnPeriodForTest( 1.0 / ( rig.fps * 8.0 ) );
+
+	for( int k = 0; k < 12; ++k )
+		if( !rig.frame( k, flatFrame( 320, 180, 255, 255, 255 ) ) )
+			return 1;
+
+	//The host changes the composition's resolution. The OUTPUT stays where it
+	//was, which is a real FFGL situation and the more awkward of the two.
+	rig.resizeSource( 400, 200 );
+
+	for( int k = 12; k < 24; ++k )
+		if( !rig.frame( k, flatFrame( 400, 200, 255, 255, 255 ) ) )
+			return 1;
+
+	const Frame out  = rig.read();
+	const int filled = rig.plugin.FilledForTest();
+	const int L      = rig.plugin.RingLengthForTest();
+	const int row    = 90;
+
+	//Only the WRITTEN part of the strip. The resize also changes the ring's
+	//length, so it is cleared and rebuilt, and the output's 320 pixels now map
+	//onto 400 ring slots -- past slot `filled` the strip is legitimately the
+	//black background, and reading that as a darkened column would make this
+	//check fail for the one reason it is not about.
+	int examined  = 0;
+	int darkest   = 255;
+	int darkestAt = -1;
+
+	for( int x = 0; x < 320; ++x )
+	{
+		const int slot =
+			static_cast< int >( std::floor( ( static_cast< double >( x ) + 0.5 )
+			                                * static_cast< double >( L ) / 320.0 ) );
+		if( slot >= filled )
+			continue;
+
+		++examined;
+		const int value = rig.at( out, x, row )[ 1 ];
+		if( value < darkest )
+		{
+			darkest   = value;
+			darkestAt = x;
+		}
+	}
+
+	std::printf( "   ring rebuilt to %d columns, %d written, %d output pixels examined,"
+	             " darkest %d of 255%s\n",
+	             L, filled, examined, darkest,
+	             darkest < 255 ? " -- a reallocated frame copy leaked into the ring" : "" );
+	check( examined > 0, "the resize left something written to look at" );
+	check( darkest == 255, "no column is darkened by the frame copies being reallocated" );
+	(void)darkestAt;
+
+	headline( "resize", "darkest column after a resolution change",
+	          std::to_string( darkest ) + " of 255 (white in, white out)" );
+	return 0;
+}
+
+//---------------------------------------------------------------------------
 // --sync. One whole sweep per bar, and per beat.
 //
 // Closed form and raster-independent: Sync derives the column period from the
@@ -2049,8 +2158,37 @@ int runNegative()
 		       "the schedule check rejects a 15% error in the column period" );
 	}
 
+	//7. A genuinely black previous frame, judged by the resize check's own
+	//   measurement. The reseed cannot be switched off from here, so the
+	//   situation it prevents is reproduced instead: one black frame followed
+	//   by white ones, at eight columns a frame with Linear interpolation, is
+	//   exactly what a reallocated frame copy looks like from the ring's side.
+	{
+		Rig rig;
+		if( !rig.begin( 320, 180 ) )
+			return 1;
+		rig.set( "Fill", static_cast< float >( kFillBuild ) );
+		rig.set( "Interpolate", static_cast< float >( kInterpolateLinear ) );
+		rig.set( "Mix", 1.0f );
+		rig.plugin.SetColumnPeriodForTest( 1.0 / ( rig.fps * 8.0 ) );
+
+		for( int k = 0; k < 12; ++k )
+			if( !rig.frame( k, flatFrame( 320, 180, k == 0 ? 0 : 255, k == 0 ? 0 : 255,
+			                              k == 0 ? 0 : 255 ) ) )
+				return 1;
+
+		const Frame out = rig.read();
+		int darkest     = 255;
+		for( int x = 0; x < std::min( rig.plugin.FilledForTest(), 320 ); ++x )
+			darkest = std::min( darkest, static_cast< int >( rig.at( out, x, 90 )[ 1 ] ) );
+
+		std::printf( "   a black previous frame darkens the strip to %d of 255\n", darkest );
+		check( darkest < 255,
+		       "the resize check rejects a frame copy that had been cleared" );
+	}
+
 	headline( "negative", "perturbations correctly rejected",
-	          std::to_string( 7 - ( g_failures - failuresBefore ) ) + " of 7" );
+	          std::to_string( 8 - ( g_failures - failuresBefore ) ) + " of 8" );
 	return 0;
 }
 
@@ -2145,6 +2283,7 @@ void usage()
 		"  --matched         at the film speed, the object's own proportions\n"
 		"  --reverse         the other way round comes out mirrored\n"
 		"  --sync            one whole sweep per bar, and per beat\n"
+		"  --resize          a composition that changes resolution mid-take\n"
 		"  --negative        every check above can actually fail\n"
 		"  --bench           time ProcessOpenGL at 720p, 1080p and 4K\n"
 		"  --help\n" );
@@ -2191,6 +2330,7 @@ int main( int argc, char** argv )
 	bool wantMatched  = false;
 	bool wantReverse  = false;
 	bool wantSync     = false;
+	bool wantResize   = false;
 	bool wantNegative = false;
 	bool wantBench    = false;
 
@@ -2248,6 +2388,8 @@ int main( int argc, char** argv )
 			wantReverse = true;
 		else if( argument == "--sync" )
 			wantSync = true;
+		else if( argument == "--resize" )
+			wantResize = true;
 		else if( argument == "--negative" )
 			wantNegative = true;
 		else if( argument == "--bench" )
@@ -2269,7 +2411,8 @@ int main( int argc, char** argv )
 	//No GL needed, so it is answered before a context is made -- which means
 	//it still works on a machine where creating one fails, and in CI.
 	if( wantSchedule && !wantStatic && !wantRing && !wantClock && !wantInterp && !wantWidth
-	    && !wantMatched && !wantReverse && !wantSync && !wantNegative && !wantBench )
+	    && !wantMatched && !wantReverse && !wantSync && !wantResize && !wantNegative
+	    && !wantBench )
 	{
 		runSchedule();
 		printSummary();
@@ -2303,7 +2446,8 @@ int main( int argc, char** argv )
 	};
 
 	const bool anyCheck = wantSchedule || wantStatic || wantRing || wantClock || wantInterp
-	                      || wantWidth || wantMatched || wantReverse || wantSync || wantNegative;
+	                      || wantWidth || wantMatched || wantReverse || wantSync || wantResize
+	                      || wantNegative;
 
 	if( anyCheck )
 	{
@@ -2325,6 +2469,8 @@ int main( int argc, char** argv )
 			runReverse();
 		if( wantSync )
 			runSync();
+		if( wantResize )
+			runResize();
 		if( wantNegative )
 			runNegative();
 

@@ -182,8 +182,19 @@ private:
 	// hand two PassBuffers the same framebuffer and delete it twice.
 	//-----------------------------------------------------------------------
 	photofinish::PassBuffer frames[ 2 ];
-	int frameIndex   = 0;    ///< which of the two holds THIS frame
+	int frameIndex    = 0;    ///< which of the two holds THIS frame
 	bool framesSeeded = false;///< false until both hold a real picture
+
+	/// The picture size the frame copies were last allocated at.
+	///
+	/// Tracked here rather than asked of the buffer, because what has to
+	/// happen when it changes is not reallocation -- PassBuffer does that --
+	/// but RESEEDING. A reallocated buffer is cleared, so the frame that was
+	/// "previous" is suddenly black, and every column taken in that frame is
+	/// blended towards black. At the fastest column rate that is a third of
+	/// the ring, once, whenever the composition changes resolution.
+	int pictureWidthWas  = 0;
+	int pictureHeightWas = 0;
 
 	//-----------------------------------------------------------------------
 	// The ring. `writePos` is the slot the next column goes into; `filled` is

@@ -21,7 +21,7 @@ that mentions time.
 - Everything: `tools/verify.sh` (fresh **universal** Release build + every
   check + the sweep + plist, codesign and oxbow, ~15 s)
 - Every check in one process: `./build/pftest --schedule --static --ring --clock
-  --interp --width --matched --reverse --sync --negative`
+  --interp --width --matched --reverse --sync --resize --negative`
 - Or through ctest, one per check: `ctest --test-dir build --output-on-failure`
 - No dead controls: `python3 tools/sweep.py` (`--size WxH`, `--frames N`)
 - The cost: `./build/pftest --bench --frames 200`, and at the fastest column
@@ -40,6 +40,7 @@ Each check, one line each:
 | `--matched` | at the film speed, the object's own proportions, in absolute pixels |
 | `--reverse` | the other way round comes out mirrored, measured as skewness |
 | `--sync` | one whole sweep per bar, and per beat |
+| `--resize` | a composition that changes resolution mid-take does not leak a freshly-cleared frame copy into the ring |
 | `--negative` | every check above, perturbed, asserted to **fail** |
 
 ## Notes
@@ -62,6 +63,10 @@ Each check, one line each:
 - **Every `Ensure()` happens before anything binds a texture** — `FFGLFBO`
   allocation unbinds the active texture unit and only on the frame that
   allocates.
+- **Reallocating a buffer clears it, and one of ours is the previous frame.**
+  A resolution change reallocates both frame copies, so `framesSeeded` is
+  cleared and the incoming picture is copied into both. `--resize` is the
+  guard.
 - **GLSL `%` and `/` are undefined on negative operands**, and float `mod` on a
   ring index returns the modulus instead of zero where the division rounds low.
   Both operands in the strip pass are non-negative integers.

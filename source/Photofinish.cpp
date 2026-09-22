@@ -296,6 +296,15 @@ bool Photofinish::EnsureBuffers( int pictureWidth, int pictureHeight, int wantLe
 			return false;
 	}
 
+	if( pictureWidth != pictureWidthWas || pictureHeight != pictureHeightWas )
+	{
+		//See the declaration: the buffers have just been cleared, so neither
+		//of them holds a previous frame any more.
+		framesSeeded     = false;
+		pictureWidthWas  = pictureWidth;
+		pictureHeightWas = pictureHeight;
+	}
+
 	const bool shapeMoved = wantLength != ringLength || wantRows != ringRows;
 
 	//Nearest on the ring, always. A column is one instant, and a filtered read
@@ -450,9 +459,18 @@ FFResult Photofinish::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	                                  : 0.0;
 
 	if( ++clockFrames == 60 )
+	{
+		//Once, at frame 60. The clock's unit and the host's transport are both
+		//invisible from the picture and both change what every column means --
+		//and the bar phase is here rather than merely being accepted because
+		//whether a host sends one at all is the whole question behind a v0.2
+		//bar-line lock. See AGENTS.md.
 		diag::info( "host clock at frame 60: raw=" + std::to_string( hostTime )
 		            + " scale=" + std::to_string( clockScale )
-		            + " seconds=" + std::to_string( now ) );
+		            + " seconds=" + std::to_string( now )
+		            + " bpm=" + std::to_string( hostBpm )
+		            + " barPhase=" + std::to_string( hostBarPhase ) );
+	}
 
 	lastNow = now;
 
@@ -641,12 +659,14 @@ FFResult Photofinish::DeInitGL()
 	frames[ 1 ].Destroy();
 	ring.Destroy();
 
-	ringLength   = 0;
-	ringRows     = 0;
-	writePos     = 0;
-	filled       = 0;
-	columnPhase  = 0.0;
-	framesSeeded = false;
+	ringLength       = 0;
+	ringRows         = 0;
+	writePos         = 0;
+	filled           = 0;
+	columnPhase      = 0.0;
+	framesSeeded     = false;
+	pictureWidthWas  = 0;
+	pictureHeightWas = 0;
 
 	return FF_SUCCESS;
 }

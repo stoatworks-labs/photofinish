@@ -118,6 +118,18 @@ active unit*. The symptom is the dangerous part: correct on every frame except
 the one that allocates. Every `Ensure()` happens before anything binds a
 texture.
 
+**Reallocating a buffer CLEARS it, and one of ours is the previous frame.**
+When the composition changes resolution, both frame copies are reallocated --
+and a reallocated `PassBuffer` is cleared on purpose, because a buffer whose
+contents are undefined is not "a bit of noise", it is whatever texture memory
+the driver handed back. So on that one frame the copy that held the *previous*
+frame is suddenly black, and every column taken in it is blended towards black:
+at the fastest column rate, a third of the ring, once, reading as a dark band
+nobody can account for. `EnsureBuffers` tracks the picture size itself and
+clears `framesSeeded` when it moves, which makes the plugin copy the incoming
+picture into BOTH buffers for that frame. `pftest --resize` is the guard, and
+the audit is what found it -- nothing else would have.
+
 **`ffglex::FFGLFBO::Release()` leaks the colour texture.** It deletes the
 framebuffer and the depth renderbuffer, then tests `depthBufferID` a second
 time where it plainly meant `colorTextureID`. `PassBuffer::Destroy()` deletes
@@ -324,7 +336,8 @@ Mac printed first, and show that the analytic bound sits comfortably inside it.
 | `--matched` | rendered width `== b`, in absolute pixels | **One column**, as above; analytic bound **0.220** at the fastest rate | Yes | **Run at 320×180 and 1280×720 with the SAME absolute pixel sizes** — a 64-pixel object must come out 64 pixels wide at both |
 | `--reverse` | skewness of the strip `== ∓` skewness of the object | **0.03**, stated. The *derived* part — the worst that sampling the object's profile on the strip's own column lattice can move its skewness, maximised over 64 phases — is computed each run and asserted to be inside it; it comes out **0.0001** | Yes. Skewness is dimensionless and invariant under the stretch, translation and scaling the strip applies, so the expected number is a property of the object alone. The expected value is obtained by integrating *the same function the card is drawn from*, never a constant typed in | Run at 320×180 and 1280×720 |
 | `--sync` | one whole sweep per bar, and per beat | **Exact**: full one frame after a bar, not full one frame before | Yes | **Run at two ring lengths** (320 and 1024), so the derived column period is a different number each time |
-| `--negative` | seven perturbations, asserted to FAIL | n/a | Yes | Run at 320×180 |
+| `--resize` | no column is darkened when the composition changes resolution mid-take | **Exact**: white in, white out, so any value below 255 is the defect | Yes | The check IS a raster change — 320×180 in, 400×200 in, with the output left at 320×180 |
+| `--negative` | eight perturbations, asserted to FAIL | n/a | Yes | Run at 320×180 |
 | `--bench` | — | **Not pass/fail.** There is no threshold worth asserting on somebody else's GPU | — | — |
 
 ### The negative controls
@@ -347,8 +360,13 @@ assertion rejects it:
    opposite-signs assertion must fail
 7. a column period **15% out** in the schedule itself, with no GL — 599 columns
    against 688
+8. **a genuinely black previous frame**, judged by `--resize`'s own
+   measurement. The reseed cannot be switched off from the harness, so the
+   situation it prevents is reproduced instead — one black frame followed by
+   white ones is exactly what a reallocated frame copy looks like from the
+   ring's side
 
-All seven reject. If one of them ever stops rejecting, the check it belongs to
+All eight reject. If one of them ever stops rejecting, the check it belongs to
 has gone soft and the number it prints means nothing.
 
 ### What the audit changed
@@ -368,6 +386,18 @@ has gone soft and the number it prints means nothing.
   triangle (−0.5657). It compares against the numerically integrated skewness
   of the actual profile instead, so softening the object's edges to stop it
   aliasing cannot silently invalidate the expected value.
+- `--resize` did not exist until the audit asked what happens when the picture
+  changes size. The answer was a real defect: both frame copies are
+  reallocated, a reallocated buffer is cleared, so whichever held the previous
+  frame goes black and every column taken in that one frame is blended towards
+  black — at the fastest column rate, a third of the ring, once, reading as a
+  dark band nobody can account for. The fix is three lines and a tracked
+  picture size; the check is what found it.
+- The first version of `--resize` failed on a correct plugin, because the
+  resize also rebuilds the RING, so the output's 320 pixels map onto 400 slots
+  and everything past the written ones is legitimately the black background.
+  It reads only the written region now. Worth recording as the shape of an
+  easy mistake: a check whose first run fails is not automatically a bug found.
 - `--width` and `--matched` were wrapping the ring on the faster cases, which
   means the integral was of two halves of two different crossings — a number
   with no meaning that was nonetheless close enough to look like a pass on the
@@ -395,7 +425,7 @@ has gone soft and the number it prints means nothing.
 **Verified, by measurement, on this machine (Apple Silicon, macOS 26.4,
 `4.1 Metal - 90.5`):**
 
-- **81 assertions**, all passing, across ten check suites. The headline numbers
+- **84 assertions**, all passing, across eleven check suites. The headline numbers
   are in the table above and `tools/verify.sh` prints them on every run.
 - **A still picture renders as bitwise-constant streaks** — 0 code values of
   difference over 2.3 million samples, at three rasters, at 1:1 and magnified,
