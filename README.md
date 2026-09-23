@@ -175,6 +175,10 @@ clock turned out to be in, and the ring's shape whenever it is rebuilt. The last
 invisible from the picture and both change what every column means. If you are filing a bug,
 this is the single most useful thing to attach.
 
+<!-- attributions:start -->
+This project is built on other people's work — see [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+<!-- attributions:end -->
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE) and [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
