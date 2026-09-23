@@ -23,7 +23,7 @@ is a third as wide. Everything that stood still is a flat streak.*
 > 5.8 days into a session) comes out bit-identical. All 13 controls are confirmed to change the
 > picture, and the bundle registers, instantiates and renders in the fleet's own test host. But it
 > has **never been loaded into Resolume on macOS**, so how the controls present in a real
-> inspector is untested. <!-- ARENA -->It has not yet been run in Resolume on Windows either.<!-- /ARENA -->
+> inspector is untested. On Windows, a build of v0.1.0 loads, registers and renders in Resolume Arena 7.27.1, with every control matching what the plugin declares — on software rendering, so that says nothing about a GPU.
 > **Try it on a spare layer first**, and please report anything that misbehaves.
 >
 > This codebase was created with AI assistance, directed and reviewed by a human author.
