@@ -27,6 +27,19 @@
 		pftest --reverse           the other way round comes out mirrored
 		pftest --negative          the checks above can actually fail
 		pftest --bench             the render cost, 720p through 4K
+		pftest --pipe              raw frames in, raw frames out
+
+	`--pipe` takes the fleet's frame format, so one filming script can drive
+	any of the FFGL plugins. Top row first on both sides, RGBA8, no header;
+	`--fps` is the synthetic clock the frames are handed over on, and it is
+	the film speed's time base, so it must match the source's real rate:
+
+	    ffmpeg -i in.mov -f rawvideo -pix_fmt rgba - \
+	      | pftest --pipe --size 1920x1080 --fps 30 [--script cues.txt] \
+	      | ffmpeg -f rawvideo -pix_fmt rgba -s 1920x1080 -r 30 -i - out.mov
+
+	It is a filming tool, not a check: it asserts nothing, and nothing in
+	tools/verify.sh runs it.
 
 	**Every check that can be raster-sensitive runs at two rasters on
 	purpose**, one of them small enough to resemble a runner with no GPU. Last
@@ -40,6 +53,7 @@
 
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
+#include <unistd.h>
 #include <zlib.h>
 
 #include <algorithm>
@@ -47,6 +61,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -2527,6 +2544,166 @@ int runBench( int frames, const std::vector< std::pair< std::string, float > >& 
 }
 
 //---------------------------------------------------------------------------
+// --pipe cue sheet: one 'frame Parameter Name value' per line, '#' comments.
+// Same format as the rest of the fleet (rosette's rztest), so one filming
+// script drives any of them. Keys are interpolated linearly; a track holds its
+// first value before its first key and its last after its last.
+//---------------------------------------------------------------------------
+using Track = std::vector< std::pair< int, float > >;
+
+std::map< std::string, Track > loadScript( const std::string& path, std::string& error )
+{
+	std::map< std::string, Track > tracks;
+	std::ifstream file( path );
+	if( !file )
+	{
+		error = "cannot open " + path;
+		return tracks;
+	}
+
+	std::string line;
+	int lineNumber = 0;
+	while( std::getline( file, line ) )
+	{
+		++lineNumber;
+		const size_t hash = line.find( '#' );
+		if( hash != std::string::npos )
+			line.erase( hash );
+		std::istringstream in( line );
+
+		int frame = 0;
+		if( !( in >> frame ) )
+			continue;
+
+		std::vector< std::string > words;
+		std::string word;
+		while( in >> word )
+			words.push_back( word );
+		if( words.size() < 2 )
+		{
+			error = path + ":" + std::to_string( lineNumber ) + ": expected `frame Parameter Name value`";
+			return {};
+		}
+
+		const float value = std::strtof( words.back().c_str(), nullptr );
+		words.pop_back();
+		std::string name = words.front();
+		for( size_t i = 1; i < words.size(); ++i )
+			name += " " + words[ i ];
+
+		tracks[ name ].emplace_back( frame, value );
+	}
+
+	for( auto& entry : tracks )
+		std::stable_sort( entry.second.begin(), entry.second.end(),
+		                  []( const auto& a, const auto& b ) { return a.first < b.first; } );
+	return tracks;
+}
+
+float valueAt( const Track& track, int frame )
+{
+	if( track.empty() )
+		return 0.0f;
+	if( frame <= track.front().first )
+		return track.front().second;
+	if( frame >= track.back().first )
+		return track.back().second;
+
+	for( size_t i = 1; i < track.size(); ++i )
+	{
+		if( frame <= track[ i ].first )
+		{
+			const auto& a    = track[ i - 1 ];
+			const auto& b    = track[ i ];
+			const float span = static_cast< float >( b.first - a.first );
+			const float t    = span > 0.0f ? ( static_cast< float >( frame - a.first ) / span ) : 1.0f;
+			return a.second + ( b.second - a.second ) * t;
+		}
+	}
+	return track.back().second;
+}
+
+//---------------------------------------------------------------------------
+// --pipe. Raw RGBA8 frames, top row first, on stdin; the same out on stdout.
+// The plugin and the rig are the ones every check uses; the only thing this
+// adds is where the frames come from and where they go.
+//---------------------------------------------------------------------------
+int runPipe( Rig& rig, int width, int height, const std::string& scriptPath )
+{
+	//Resolve the script's names once, up front, and refuse to run on one that
+	//is not a parameter: a misspelled cue that silently did nothing would
+	//produce a take that looks deliberate and is wrong. The About block is
+	//refused too -- its entries are buttons that open a web browser.
+	std::map< unsigned int, Track > automation;
+	if( !scriptPath.empty() )
+	{
+		std::string error;
+		const std::map< std::string, Track > tracks = loadScript( scriptPath, error );
+		if( !error.empty() )
+		{
+			std::fprintf( stderr, "%s\n", error.c_str() );
+			return 2;
+		}
+		const std::vector< NamedParameter > known = listParameters( rig.plugin );
+		for( const auto& entry : tracks )
+		{
+			bool found = false;
+			for( const NamedParameter& p : known )
+			{
+				if( p.index >= Photofinish::PT_ABOUT_FIRST || p.name != entry.first )
+					continue;
+				automation[ p.index ] = entry.second;
+				found                 = true;
+				break;
+			}
+			if( !found )
+			{
+				std::fprintf( stderr, "script names '%s', which is not a control (try --list)\n",
+				              entry.first.c_str() );
+				return 2;
+			}
+		}
+	}
+
+	Frame frame( static_cast< size_t >( width ) * height * 4 );
+	for( int index = 0;; ++index )
+	{
+		size_t filled = 0;
+		while( filled < frame.size() )
+		{
+			const ssize_t got = read( STDIN_FILENO, frame.data() + filled, frame.size() - filled );
+			if( got <= 0 )
+				break;
+			filled += static_cast< size_t >( got );
+		}
+		if( filled < frame.size() )
+			break;
+
+		for( const auto& track : automation )
+			rig.plugin.SetFloatParameter( track.first, valueAt( track.second, index ) );
+
+		//A raw frame arrives top row first; everything in this harness is
+		//bottom row first, and so is GL.
+		if( !rig.frame( index, flipRows( frame, width, height ) ) )
+		{
+			std::fprintf( stderr, "ProcessOpenGL failed on frame %d\n", index );
+			return 1;
+		}
+
+		const Frame out = flipRows( rig.read(), width, height );
+		size_t written  = 0;
+		while( written < out.size() )
+		{
+			const ssize_t put = write( STDOUT_FILENO, out.data() + written, out.size() - written );
+			if( put <= 0 )
+				return 1;
+			written += static_cast< size_t >( put );
+		}
+	}
+	return 0;
+}
+
+//---------------------------------------------------------------------------
 void usage()
 {
 	std::printf(
@@ -2552,6 +2729,9 @@ void usage()
 		"  --resize          a composition that changes resolution mid-take\n"
 		"  --negative        every check above can actually fail\n"
 		"  --bench           time ProcessOpenGL at 720p, 1080p and 4K\n"
+		"\n"
+		"  --pipe            raw RGBA frames on stdin, raw RGBA frames on stdout (top row first)\n"
+		"  --script PATH     parameter cues for --pipe: 'frame Parameter Name value'\n"
 		"  --help\n" );
 }
 
@@ -2581,6 +2761,7 @@ int main( int argc, char** argv )
 {
 	std::string outPath = "/tmp/photofinish.png";
 	std::string cardPath;
+	std::string scriptPath;
 	int width  = 1280;
 	int height = 720;
 	int frames = 90;
@@ -2600,6 +2781,7 @@ int main( int argc, char** argv )
 	bool wantSlit     = false;
 	bool wantNegative = false;
 	bool wantBench    = false;
+	bool wantPipe     = false;
 
 	std::vector< std::string > settings;
 
@@ -2663,6 +2845,10 @@ int main( int argc, char** argv )
 			wantNegative = true;
 		else if( argument == "--bench" )
 			wantBench = true;
+		else if( argument == "--pipe" )
+			wantPipe = true;
+		else if( argument == "--script" && hasNext )
+			scriptPath = argv[ ++i ];
 		else
 		{
 			std::fprintf( stderr, "unknown argument: %s\n", argument.c_str() );
@@ -2811,6 +2997,9 @@ int main( int argc, char** argv )
 		}
 		return finish( 0 );
 	}
+
+	if( wantPipe )
+		return finish( runPipe( rig, width, height, scriptPath ) );
 
 	for( int k = 0; k < frames; ++k )
 	{
