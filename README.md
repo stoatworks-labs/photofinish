@@ -88,6 +88,17 @@ axis is time, that average is over the time an object takes to cross the slit. I
 blur in the time axis, arrived at rather than added — and it does nothing at all to the
 other axis, which is how you can tell.
 
+[![Photofinish — a slit-scan strip camera as an effect, for Resolume](docs/video-thumb.png)](https://www.youtube.com/watch?v=gLk9shewRcU)
+
+*[Watch it](https://www.youtube.com/watch?v=gLk9shewRcU) — 50 seconds: one
+column photographed over and over, whatever stands still smeared into a
+streak, Time Per Column squashing and stretching what crosses, the film run at
+the drift's own speed, Flip Direction, and the slit laid flat on the vertical
+axis. Every frame is the real plugin's output: an FFGL plugin has no window,
+so the footage is rendered by this repository's own offline harness
+(`pftest --pipe`, driven by a cue sheet) rather than filmed off a screen, and
+the clips are Resolume's bundled demo media.*
+
 ## Controls
 
 **Slit** — where the sensor is.
