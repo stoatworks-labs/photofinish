@@ -307,7 +307,8 @@ not justify it for 0.1.0, and the round this plugin was built in was about the
 verification pass rather than the surface. It is the obvious v0.2 alongside the
 bar-line lock.
 
-**No OpenFX port and no browser demo.** Not required for 0.1.0. The OFX port is
+**No OpenFX port.** Not required for 0.1.0. (The browser demo exists; see *The
+browser demo* below.) The OFX port is
 genuinely interesting here because OFX *can* ask for other frames — a strip
 camera in Resolve could be exact rather than interpolated — and that is worth a
 note rather than a rush.
@@ -540,8 +541,70 @@ correctness one, and `--ring` is what says the strip is right at all.
 - **`Sync` has never seen a real `SetBeatInfo`.** The check runs at the SDK's
   default 120 bpm, which is what a host that never calls it leaves in place. A
   tempo change mid-take has not been tried.
-- **No bar-line lock, no presets, no OpenFX, no browser demo.** See the
+- **No bar-line lock, no presets, no OpenFX.** See the
   decisions above.
+
+---
+
+## The browser demo
+
+`demo/` is the page at **photofinish-demo.stoatworks-labs.com**, built on the
+shared kit in `infrastructure/stoatworks-backend/resolume-demo/` (vendored into
+`demo/vendor/` by its `sync.sh` — fix a kit bug there, never here). Added
+2026-09-24.
+
+**What is the plugin's own code.** The three passes: `kVertexShader`,
+`kCopyShader`, `kSlitShader` and `kStripShader`, copied into `demo/plugin.js`
+unedited. `demo/tools/check_shaders.py` compares all four character for
+character and `tools/verify.sh` runs it.
+
+**What is a port, checked by a reader and nothing else.** The other half of the
+plugin, which is its clock and its state: `Strip.cpp` in full (`advance`,
+`blendAt`, `kColumnSnap`, `kMaxFrameDelta`), `Controls.cpp` in full,
+`ColumnPeriod()`, the sorted option lists `declareOptions` builds (the kit's
+dropdown stores the display slot, so the page carries the slot-to-value table
+the host would — Fill reads Build, Once, Scroll and stores 0, 2, 1), and
+`EnsureBuffers()` / `ProcessOpenGL()` pass for pass: two frame copies, the
+previous one seeded on the first frame and after a resize, the ring cleared
+whenever its shape moves, the whole-ring cap, Fill = Once stopping, and one draw
+per column into a one-pixel-wide viewport.
+
+That port was cross-checked once, on 2026-09-24, and nothing re-runs it:
+`SweepColumns` at 960 and 540, `SlitWidthPixels` and `TimePerColumnSeconds` at
+six slider positions, and 3000 frames of `advance`/`blendAt` at four column
+periods from a clock origin of 499,217.238 s (the column totals, the carried
+phase and sampled blends) agreed with the C++ compiled beside it, printed to
+twelve significant figures. To redo it, pull the port's functions out of
+`demo/plugin.js` into a `.mjs` and compile `Controls.cpp` and `Strip.cpp` into a
+one-file program beside it.
+
+**The page keeps its buffers across frames**, as the plugin does — the ring and
+the previous frame are PassBuffers the kit never clears. A strip rebuilt every
+frame would be a different effect.
+
+**What is not the plugin.** The clock is the page's, in seconds, and only its
+differences are used: the page is the host and says seconds, as `pftest` does
+through `SetClockScaleForTest( 1.0 )`, where the plugin would vote on the unit.
+`Sync = Beat` and `Bar` run at 120 bpm, because a browser has no host tempo —
+the SDK's default, which is also all `--sync` has ever seen. The About block is
+absent. There is no audio caveat beyond that: the plugin has no audio input.
+
+**Decided without asking.** The clip list starts on *Lights on black* — three
+blobs crossing the slit both ways at different speeds put the stretched, the
+squashed and the backwards runner on screen at once. The presets are the page's
+own (the plugin ships none) and are plain parameter values. A line under the
+canvas reports the ring's shape, the head and the columns taken last frame,
+because the ring is state a visitor cannot otherwise see, and Sweep Length
+clearing it would otherwise read as a glitch.
+
+**Left stale on purpose.** `docs/USER-GUIDE.md` still says there is no browser
+demo. The guide is rendered to a PDF and to the website by `build_guides.py`,
+which is a release chore rather than a demo one; correct it at the next guide
+sync.
+
+Deploy with `cf-run npx wrangler deploy` from the repo root; there is no build
+step. Verify by content, not by status code:
+`curl -s 'https://photofinish-demo.stoatworks-labs.com/?cb=1' | grep -o '<title>[^<]*'`.
 
 ---
 

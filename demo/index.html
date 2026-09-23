@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Photofinish — browser demo | Stoatworks Labs</title>
+    <meta name="description" content="Try the Photofinish strip-camera FFGL plugin for Resolume in your browser. The plugin's own copy, slit and strip shaders ported to WebGL2, with its column schedule ported to JavaScript and its ring kept from frame to frame." />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./vendor/kit.css" />
+    <link rel="canonical" href="https://photofinish-demo.stoatworks-labs.com/" />
+  </head>
+  <body>
+    <main id="demo">
+      <noscript>
+        <p>
+          This demo runs the plugin's shaders in your browser, so it needs
+          JavaScript and WebGL2. The plugin itself, its source and its downloads
+          are on
+          <a href="https://github.com/stoatworks-labs/photofinish">its repository</a>.
+        </p>
+      </noscript>
+    </main>
+
+    <script type="module" src="./plugin.js"></script>
+    <script
+      src="./vendor/support-footer.js"
+      defer
+      data-app="Photofinish"
+      data-repo="https://github.com/stoatworks-labs/photofinish"
+      data-note="A browser demo of the plugin's own shaders and a port of its column clock. Nothing you load here leaves your machine."
+    ></script>
+  </body>
+</html>

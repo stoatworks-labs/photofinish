@@ -171,7 +171,12 @@ User guide: [docs/USER-GUIDE.md](docs/USER-GUIDE.md), also at https://stoatworks
   has an honest limit: anything crossing the slit in less than one host frame was never
   over the slit in a frame the plugin was given, and no interpolation recovers it. FFGL has
   no way to ask for a frame it was not handed.
-- No factory presets. No OpenFX port, no browser demo — neither is required for 0.1.0.
+- No factory presets. No OpenFX port — not required for 0.1.0.
+- The [browser demo](https://photofinish-demo.stoatworks-labs.com) runs the plugin's own
+  copy, slit and strip shaders ported to WebGL2, and `demo/tools/check_shaders.py` holds
+  that GLSL character-for-character against `source/Shaders.cpp` — but the column clock
+  and the ring's bookkeeping beside it are a hand port of `Strip.cpp`, `Controls.cpp`
+  and `ProcessOpenGL()`, and nothing checks those.
 - The About block has five entries — the About text, then User guide, Project page,
   Source on GitHub and Support the work — so the plugin shows 18 parameters in all
   (`pftest --list`): the 13 controls and the About block. `source/StoatworksAbout.h` is

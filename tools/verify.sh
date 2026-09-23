@@ -159,6 +159,23 @@ else
 	fail "a shader does not compile"
 fi
 
+#---------------------------------------------------------------------------
+# The browser demo's copy of the same GLSL.
+#
+# demo/plugin.js cannot include a C++ file, so it carries its own copy of every
+# shader, and two copies drift quietly: the plugin keeps working, the page keeps
+# working, and they stop being the same effect. This compares them character for
+# character. It says nothing about the page's PORT of the CPU half; only a
+# reader checks that.
+#---------------------------------------------------------------------------
+step "demo: the browser copy of the shaders"
+if python3 demo/tools/check_shaders.py >/tmp/photofinish-demo-shaders.log 2>&1; then
+	pass "$( tail -1 /tmp/photofinish-demo-shaders.log )"
+else
+	fail "the demo's shaders have drifted -- see /tmp/photofinish-demo-shaders.log"
+	tail -12 /tmp/photofinish-demo-shaders.log
+fi
+
 step "build (fresh, universal, Release)"
 rm -rf "$BUILD"
 if ! cmake -B "$BUILD" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1; then

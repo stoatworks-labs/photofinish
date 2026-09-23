@@ -26,6 +26,7 @@ that mentions time.
 - No dead controls: `python3 tools/sweep.py` (`--size WxH`, `--frames N`)
 - The cost: `./build/pftest --bench --frames 200`, and at the fastest column
   rate: `--set "Time Per Column=0"`
+- The browser demo still runs the plugin's GLSL: `python3 demo/tools/check_shaders.py`
 
 Each check, one line each:
 
@@ -111,9 +112,21 @@ Each check, one line each:
 
 ## Not done yet
 - Not yet loaded into Resolume on macOS, and not installed anywhere.
-- No factory presets, no bar-line lock, no OpenFX port, no browser demo.
+- No factory presets, no bar-line lock, no OpenFX port.
 - The universal build has never run on an Intel Mac; render cost is measured
   on macOS (Apple Silicon) only.
+
+## Browser demo
+
+`demo/` is the page at **photofinish-demo.stoatworks-labs.com**: the plugin's
+own three passes, copied across unedited, plus a hand port of `Strip.cpp`,
+`Controls.cpp` and the ring bookkeeping in `ProcessOpenGL()`. It keeps its ring
+and its previous frame across frames, as the plugin does. The kit in
+`demo/vendor/` is vendored from `infrastructure/stoatworks-backend/resolume-demo/`
+by its `sync.sh` — fix a kit bug THERE, never here. There is no build step;
+`cf-run npx wrangler deploy` from the repo root uploads `demo/` as it stands,
+and the page is verified by content rather than by status code. `AGENTS.md`
+has what the page leaves out and why.
 
 ## Diagnostics
 
