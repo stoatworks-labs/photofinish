@@ -575,8 +575,6 @@ const opt = (id, name, def, group, hint) => ({
 });
 const bool = (id, name, def, group, hint) => ({ id, name, type: 'boolean', default: def, group, hint });
 
-const columnsPerFrame = (seconds) => (1 / 60) / seconds;
-
 const demo = mountDemo({
   name: 'Photofinish',
   pluginId: 'PF01',
@@ -608,11 +606,9 @@ const demo = mountDemo({
     opt('direction', 'Direction', 0, 'Slit', 'Which end of the scan axis is the newest column.'),
 
     std('timePerColumn', 'Time Per Column', 0.307, 'Time', {
-      display: (v) => {
-        const s = TimePerColumnSeconds(v);
-        const perFrame = columnsPerFrame(s);
-        return `${(s * 1000).toFixed(2)} ms · ${perFrame >= 1 ? perFrame.toFixed(1) : perFrame.toFixed(2)}/frame`;
-      },
+      // Seconds are the plugin's unit. Columns per 60 fps frame would not fit
+      // beside the slider; the line under the canvas says how many were taken.
+      display: (v) => `${(TimePerColumnSeconds(v) * 1000).toFixed(2)} ms`,
       hint: 'The film speed, and the only rate in the plugin. Everything else about the picture follows from it and from how fast the subject moves. Below a frame period the columns between two delivered frames are built from both of them, which is what Interpolate is for.',
     }),
     std('sweepLength', 'Sweep Length', 1.0, 'Time', {
