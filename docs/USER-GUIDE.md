@@ -266,7 +266,10 @@ Shorter Sweep Lengths make the ring smaller.
 - **Nothing faster than a frame can be recovered.** FFGL gives a plugin the frames the host sends
   and no way to ask for others.
 - **Slit Angle is 45° only on a square picture.**
-- **No factory presets**, no OpenFX version and no browser demo.
+- **No factory presets** and no OpenFX version.
+- **There is a browser demo** at [photofinish-demo.stoatworks-labs.com](https://photofinish-demo.stoatworks-labs.com).
+  It is a port to a web page, not the plugin: the shaders run in WebGL2 and any CPU
+  half is rewritten in JavaScript. The page lists what it does not reproduce.
 - **Never run on Intel** (the universal build contains the slice; only Apple Silicon has run it),
   **or on a machine without a GPU**.
 
