@@ -274,7 +274,7 @@ Shorter Sweep Lengths make the ring smaller.
   It's a port to a web page rather than the plugin: the shaders run in WebGL2 and any CPU
   half is rewritten in JavaScript. The page lists what it doesn't reproduce.
 - **Never run on Intel** (the universal build contains the slice; only Apple Silicon has run it),
-  **or on a machine without a GPU**.
+  **or on any GPU but Apple Silicon's**.
 
 ---
 
